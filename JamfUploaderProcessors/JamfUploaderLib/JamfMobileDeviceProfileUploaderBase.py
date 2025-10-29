@@ -1,4 +1,5 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
 Copyright 2023 Graham Pugh
@@ -79,11 +80,10 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
     def replace_uuid_and_identifier_in_mobileconfig(
         self, mobileconfig_contents, existing_uuid, existing_identifier
     ):
+        """updates the UUID in a mobileconfig file to match the UUID of an existing profile"""
         self.output("Updating the UUIDs in the mobileconfig", verbose_level=2)
         mobileconfig_contents["PayloadIdentifier"] = existing_identifier
         mobileconfig_contents["PayloadUUID"] = existing_uuid
-        # with open(self.mobileconfig, "wb") as file:
-        #     plistlib.dump(mobileconfig_contents, file)
         return mobileconfig_contents
 
     def unsign_signed_mobileconfig(self, mobileconfig_plist):
@@ -120,6 +120,7 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
         devicegroup_name,
         template_contents,
         profile_uuid,
+        sleep_time,
         token,
         obj_id=0,
     ):
@@ -159,11 +160,11 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
 
         self.output("Uploading Configuration Profile...")
         # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
+        template_xml = self.write_temp_file(jamf_url, template_contents)
 
         # if we find an object ID we put, if not, we post
         object_type = "configuration_profile"
-        url = "{}/{}/id/{}".format(jamf_url, self.api_endpoints(object_type), obj_id)
+        url = f"{jamf_url}/{self.api_endpoints(object_type)}/id/{obj_id}"
 
         count = 0
         while True:
@@ -193,8 +194,8 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
                 )
                 self.output(f"\nHTTP POST Response Code: {r.status_code}")
                 break
-            if int(self.sleep) > 30:
-                sleep(int(self.sleep))
+            if int(sleep_time) > 30:
+                sleep(int(sleep_time))
             else:
                 sleep(30)
 
@@ -202,69 +203,55 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
 
     def execute(self):
         """Upload a mobile device configuration profile"""
-        self.jamf_url = self.env.get("JSS_URL").rstrip("/")
-        self.jamf_user = self.env.get("API_USERNAME")
-        self.jamf_password = self.env.get("API_PASSWORD")
-        self.client_id = self.env.get("CLIENT_ID")
-        self.client_secret = self.env.get("CLIENT_SECRET")
-        self.profile_name = self.env.get("profile_name")
-        self.mobileconfig = self.env.get("mobileconfig")
-        self.identifier = self.env.get("identifier")
-        self.template = self.env.get("profile_template")
-        self.profile_category = self.env.get("profile_category")
-        self.organization = self.env.get("organization")
-        self.profile_description = self.env.get("profile_description")
-        self.profile_mobiledevicegroup = self.env.get("profile_mobiledevicegroup")
-        self.replace = self.env.get("replace_profile")
-        self.sleep = self.env.get("sleep")
-        self.unsign = self.env.get("unsign_profile")
-        # handle setting unsign in overrides
-        if not self.unsign or self.unsign == "False":
-            self.unsign = False
-        # handle setting replace in overrides
-        if not self.replace or self.replace == "False":
-            self.replace = False
-
-        # clear any pre-existing summary result
-        if "JamfMobileDeviceProfileUploader_summary_result" in self.env:
-            del self.env["JamfMobileDeviceProfileUploader_summary_result"]
-
+        jamf_url = self.env.get("JSS_URL").rstrip("/")
+        jamf_user = self.env.get("API_USERNAME")
+        jamf_password = self.env.get("API_PASSWORD")
+        client_id = self.env.get("CLIENT_ID")
+        client_secret = self.env.get("CLIENT_SECRET")
+        profile_name = self.env.get("profile_name")
+        mobileconfig = self.env.get("mobileconfig")
+        template = self.env.get("profile_template")
+        profile_category = self.env.get("profile_category")
+        organization = self.env.get("organization")
+        profile_description = self.env.get("profile_description")
+        profile_mobiledevicegroup = self.env.get("profile_mobiledevicegroup")
+        replace_profile = self.to_bool(self.env.get("replace_profile"))
+        sleep_time = self.env.get("sleep")
         profile_updated = False
 
+        # clear any pre-existing summary result
+        if "jamfmobiledeviceprofilepploader_summary_result" in self.env:
+            del self.env["jamfmobiledeviceprofilepploader_summary_result"]
+
+        # substitute values in the profile name and category
+        profile_name = self.substitute_assignable_keys(profile_name)
+        profile_category = self.substitute_assignable_keys(profile_category)
+
         # handle files with no path
-        if self.mobileconfig and "/" not in self.mobileconfig:
-            found_mobileconfig = self.get_path_to_file(self.mobileconfig)
+        if mobileconfig and "/" not in mobileconfig:
+            found_mobileconfig = self.get_path_to_file(mobileconfig)
             if found_mobileconfig:
-                self.mobileconfig = found_mobileconfig
+                mobileconfig = found_mobileconfig
             else:
                 raise ProcessorError(
-                    f"ERROR: mobileconfig file {self.mobileconfig} not found"
+                    f"ERROR: mobileconfig file {mobileconfig} not found"
                 )
-        if self.template and "/" not in self.template:
-            found_template = self.get_path_to_file(self.template)
+        if template and "/" not in template:
+            found_template = self.get_path_to_file(template)
             if found_template:
-                self.template = found_template
+                template = found_template
             else:
-                raise ProcessorError(
-                    f"ERROR: XML template file {self.template} not found"
-                )
+                raise ProcessorError(f"ERROR: XML template file {template} not found")
 
         # if an unsigned mobileconfig file is supplied we can get the name, organization and
         # description from it, but allowing the values to be substituted by Input keys
-        if self.mobileconfig:
-            self.output(f"mobileconfig file supplied: {self.mobileconfig}")
-            # check if the file is signed
-            mobileconfig_file = self.unsign_signed_mobileconfig(self.mobileconfig)
-            # quit if we get an unsigned profile back and we didn't select --unsign
-            if mobileconfig_file and not self.unsign:
-                raise ProcessorError(
-                    "Signed profiles cannot be uploaded to Jamf Pro via the API. "
-                    "Use the GUI to upload the signed profile, or use --unsign to upload "
-                    "the profile with the signature removed."
-                )
+        description = ""
+        organization = ""
+        if mobileconfig:
+            self.output(f"mobileconfig file supplied: {mobileconfig}")
 
             # import mobileconfig
-            with open(self.mobileconfig, "rb") as file:
+            with open(mobileconfig, "rb") as file:
                 mobileconfig_plist = file.read()
                 # substitute user-assignable keys (requires decode to string)
                 mobileconfig_plist = str.encode(
@@ -278,57 +265,55 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
                 self.output(f"Configuration Profile name: {mobileconfig_name}")
                 self.output("Mobileconfig contents:", verbose_level=2)
                 self.output(mobileconfig_plist.decode("UTF-8"), verbose_level=2)
-            except KeyError:
+            except KeyError as exc:
                 raise ProcessorError(
                     "ERROR: Invalid mobileconfig file supplied - cannot import"
-                )
+                ) from exc
             try:
                 description = mobileconfig_contents["PayloadDescription"]
             except KeyError:
-                description = ""
+                pass
             try:
                 organization = mobileconfig_contents["PayloadOrganization"]
             except KeyError:
-                organization = ""
+                pass
 
         # automatically provide a description and organisation from the mobileconfig
         # if not provided in the options
-        if not self.profile_description:
+        if not profile_description:
             if description:
-                self.profile_description = description
+                profile_description = description
             else:
-                self.profile_description = (
+                profile_description = (
                     "Config profile created by AutoPkg and "
                     "JamfMobileDeviceProfileUploader"
                 )
-        if not self.organization:
-            if organization:
-                self.organization = organization
-            else:
-                organization = "AutoPkg"
-                self.organization = organization
+        if not organization:
+            organization = "AutoPkg"
 
         # import profile template
-        with open(self.template, "r") as file:
+        with open(template, "r", encoding="utf-8") as file:
             template_contents = file.read()
 
         # check for existing Configuration Profile
-        self.output(f"Checking for existing '{mobileconfig_name}' on {self.jamf_url}")
+        self.output(f"Checking for existing '{mobileconfig_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if self.jamf_url and self.client_id and self.client_secret:
-            token = self.handle_oauth(self.jamf_url, self.client_id, self.client_secret)
-        elif self.jamf_url and self.jamf_user and self.jamf_password:
+        if jamf_url:
             token = self.handle_api_auth(
-                self.jamf_url, self.jamf_user, self.jamf_password
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         obj_type = "configuration_profile"
         obj_name = mobileconfig_name
         obj_id = self.get_api_obj_id_from_name(
-            self.jamf_url,
+            jamf_url,
             obj_name,
             obj_type,
             token=token,
@@ -337,13 +322,17 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
             self.output(
                 f"Configuration Profile '{mobileconfig_name}' already exists: ID {obj_id}"
             )
-            if self.replace:
+            if replace_profile:
+                self.output(
+                    "Replacing existing Computer Profile as 'replace_profile' is set to True",
+                    verbose_level=1,
+                )
                 # grab existing UUID from profile as it MUST match on the destination
                 (
                     existing_uuid,
                     existing_identifier,
-                ) = self.get_existing_uuid_and_identifier(self.jamf_url, obj_id, token)
-                if self.mobileconfig:
+                ) = self.get_existing_uuid_and_identifier(jamf_url, obj_id, token)
+                if mobileconfig:
                     # need to inject the existing payload identifier to prevent ghost profiles
                     mobileconfig_contents = (
                         self.replace_uuid_and_identifier_in_mobileconfig(
@@ -357,14 +346,15 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
                 # now upload the mobileconfig by generating an XML template
                 if mobileconfig_plist:
                     self.upload_mobileconfig(
-                        self.jamf_url,
+                        jamf_url,
                         mobileconfig_name,
-                        self.profile_description,
-                        self.profile_category,
+                        profile_description,
+                        profile_category,
                         mobileconfig_plist,
-                        self.profile_mobiledevicegroup,
+                        profile_mobiledevicegroup,
                         template_contents,
                         existing_uuid,
+                        sleep_time,
                         token,
                         obj_id=obj_id,
                     )
@@ -372,7 +362,7 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
             else:
                 self.output(
                     "Not replacing existing Configuration Profile. "
-                    "Override the replace_profile key to True to enforce."
+                    "Set the replace_profile key to True to enforce."
                 )
         else:
             self.output(
@@ -383,14 +373,15 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
             # now upload the mobileconfig by generating an XML template
             if mobileconfig_plist:
                 self.upload_mobileconfig(
-                    self.jamf_url,
+                    jamf_url,
                     mobileconfig_name,
-                    self.profile_description,
-                    self.profile_category,
+                    profile_description,
+                    profile_category,
                     mobileconfig_plist,
-                    self.profile_mobiledevicegroup,
+                    profile_mobiledevicegroup,
                     template_contents,
                     new_uuid,
+                    sleep_time,
                     token=token,
                 )
                 profile_updated = True
@@ -400,10 +391,10 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
                 )
 
         # output the summary
-        self.env["profile_name"] = self.profile_name
+        self.env["profile_name"] = profile_name
         self.env["profile_updated"] = profile_updated
         if profile_updated:
-            self.env["JamfMobileDeviceProfileUploader_summary_result"] = {
+            self.env["jamfmobiledeviceprofilepploader_summary_result"] = {
                 "summary_text": (
                     "The following configuration profiles were uploaded to "
                     "or updated in Jamf Pro:"
@@ -411,6 +402,6 @@ class JamfMobileDeviceProfileUploaderBase(JamfUploaderBase):
                 "report_fields": ["mobileconfig_name", "profile_category"],
                 "data": {
                     "mobileconfig_name": mobileconfig_name,
-                    "profile_category": self.profile_category,
+                    "profile_category": profile_category,
                 },
             }

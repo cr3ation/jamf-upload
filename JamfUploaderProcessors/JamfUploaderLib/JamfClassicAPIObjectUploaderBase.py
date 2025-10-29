@@ -37,36 +37,16 @@ from JamfUploaderBase import (  # pylint: disable=import-error, wrong-import-pos
 
 
 class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
-    """Class for functions used to upload a generic API object to Jamf"""
-
-    def prepare_template(self, object_name, object_template):
-        """prepare the object contents"""
-        # import template from file and replace any keys in the template
-        if os.path.exists(object_template):
-            with open(object_template, "r", encoding="utf-8") as file:
-                template_contents = file.read()
-        else:
-            raise ProcessorError("Template does not exist!")
-
-        # substitute user-assignable keys
-        object_name = self.substitute_assignable_keys(object_name)
-        template_contents = self.substitute_assignable_keys(
-            template_contents, xml_escape=True
-        )
-
-        self.output("object data:", verbose_level=2)
-        self.output(template_contents, verbose_level=2)
-
-        # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
-        return object_name, template_xml
+    """Class for functions used to upload a generic API object to Jamf.
+    Note: Individual processors in this repo for specific API endpoints should always
+    be used if available"""
 
     def upload_object(
         self,
         jamf_url,
         object_name,
         object_type,
-        template_xml,
+        template_file,
         sleep_time,
         token,
         obj_id=0,
@@ -87,7 +67,7 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
                 request=request,
                 url=url,
                 token=token,
-                data=template_xml,
+                data=template_file,
             )
             # check HTTP response
             if self.status_check(r, object_type, object_name, request) == "break":
@@ -114,11 +94,8 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
         object_name = self.env.get("object_name")
         object_type = self.env.get("object_type")
         object_template = self.env.get("object_template")
-        replace_object = self.env.get("replace_object")
+        replace_object = self.to_bool(self.env.get("replace_object"))
         sleep_time = self.env.get("sleep")
-        # handle setting replace in overrides
-        if not replace_object or replace_object == "False":
-            replace_object = False
         object_updated = False
 
         # clear any pre-existing summary result
@@ -131,22 +108,30 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
             if found_template:
                 object_template = found_template
             else:
-                raise ProcessorError(f"ERROR: Policy file {object_template} not found")
+                raise ProcessorError(
+                    f"ERROR: {object_type} file {object_template} not found"
+                )
 
         # we need to substitute the values in the object name and template now to
         # account for version strings in the name
-        object_name, template_xml = self.prepare_template(object_name, object_template)
+        object_name, template_file = self.prepare_template(
+            jamf_url, object_type, object_template, object_name, xml_escape=True
+        )
 
         # now start the process of uploading the object
         self.output(f"Checking for existing '{object_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # Check for existing item
         self.output(f"Checking for existing '{object_name}' on {jamf_url}")
@@ -163,7 +148,7 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
             if replace_object:
                 self.output(
                     f"Replacing existing {object_type} as replace_object is "
-                    f"set to '{replace_object}'",
+                    "set to True",
                     verbose_level=1,
                 )
             else:
@@ -178,7 +163,7 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
             jamf_url,
             object_name,
             object_type,
-            template_xml,
+            template_file,
             sleep_time,
             token=token,
             obj_id=obj_id,
@@ -192,9 +177,10 @@ class JamfClassicAPIObjectUploaderBase(JamfUploaderBase):
         if object_updated:
             self.env["jamfclassicapiobjectuploader_summary_result"] = {
                 "summary_text": "The following objects were updated in Jamf Pro:",
-                "report_fields": [object_type, "template"],
+                "report_fields": ["object_name", "object_type", "template"],
                 "data": {
-                    object_type: object_name,
+                    "object_type": object_type,
+                    "object_name": object_name,
                     "template": object_template,
                 },
             }

@@ -15,6 +15,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
+DEPRECATION NOTICE:
+This processor has been superceded by the functionally equivalent
+JamfObjectUploader processor, and will be removed at a future date.
+Please update any recipes or sscripts to use JamfObjectUploader.
+The input and output variables are unachanged.
+
 NOTES:
 The API endpoint must be defined in the api_endpoints function in JamfUploaderBase.py
 
@@ -29,7 +35,7 @@ import sys
 # imports require noqa comments for E402
 sys.path.insert(0, os.path.dirname(__file__))
 
-from JamfUploaderLib.JamfClassicAPIObjectUploaderBase import (  # noqa: E402
+from JamfUploaderLib.JamfClassicAPIObjectUploaderBase import (  # pylint: disable=import-error, wrong-import-position
     JamfClassicAPIObjectUploaderBase,
 )
 
@@ -37,11 +43,7 @@ __all__ = ["JamfClassicAPIObjectUploader"]
 
 
 class JamfClassicAPIObjectUploader(JamfClassicAPIObjectUploaderBase):
-    description = (
-        "A processor for AutoPkg that will create or update an API object template "
-        "on a Jamf Pro server."
-        "'Jamf Pro privileges are required by the API_USERNAME user for whatever the endpoint is."
-    )
+    description = "THIS PROCESSOR IS DEPRECATED. Please use JamfObjectUploader instead."
 
     input_variables = {
         "JSS_URL": {
@@ -106,9 +108,6 @@ class JamfClassicAPIObjectUploader(JamfClassicAPIObjectUploaderBase):
             "description": "Jamf object name of the newly created or modified object.",
         },
         "object_updated": {"description": "Boolean - True if the object was changed."},
-        "changed_id": {
-            "description": "Jamf object ID of the newly created or modified object.",
-        },
     }
 
     def main(self):

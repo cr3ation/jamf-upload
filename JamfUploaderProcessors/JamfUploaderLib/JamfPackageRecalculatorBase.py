@@ -1,4 +1,5 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
 Copyright 2023 Graham Pugh
@@ -67,40 +68,31 @@ class JamfPackageRecalculatorBase(JamfUploaderBase):
     ):  # pylint: disable=too-many-branches, too-many-locals, too-many-statements
         """Perform the package recalculation"""
 
-        self.sleep = self.env.get("sleep")
-        self.jcds2_mode = self.env.get("jcds2_mode")
-        self.pkg_api_mode = self.env.get("pkg_api_mode")
-        self.jamf_url = self.env.get("JSS_URL").rstrip("/")
-        self.jamf_user = self.env.get("API_USERNAME")
-        self.jamf_password = self.env.get("API_PASSWORD")
-        self.client_id = self.env.get("CLIENT_ID")
-        self.client_secret = self.env.get("CLIENT_SECRET")
-        self.recipe_cache_dir = self.env.get("RECIPE_CACHE_DIR")
+        jcds2_mode = self.to_bool(self.env.get("jcds2_mode"))
+        pkg_api_mode = self.to_bool(self.env.get("pkg_api_mode"))
+        jamf_url = self.env.get("JSS_URL").rstrip("/")
+        jamf_user = self.env.get("API_USERNAME")
+        jamf_password = self.env.get("API_PASSWORD")
+        client_id = self.env.get("CLIENT_ID")
+        client_secret = self.env.get("CLIENT_SECRET")
 
-        # handle setting true/false variables in overrides
-        if not self.pkg_api_mode or self.pkg_api_mode == "False":
-            self.pkg_api_mode = False
-        if not self.jcds2_mode or self.jcds2_mode == "False":
-            self.jcds2_mode = False
-
-        # set pkg_api_mode if appropriate
-
-        # get Jamf Pro version to determine default mode (need to get a token)
-        # Version 11.5+ will use the v1/packages endpoint
-        if self.jamf_url and self.client_id and self.client_secret:
-            token = self.handle_oauth(self.jamf_url, self.client_id, self.client_secret)
-        elif self.jamf_url and self.jamf_user and self.jamf_password:
+        # get token using oauth or basic auth depending on the credentials given
+        if jamf_url:
             token = self.handle_api_auth(
-                self.jamf_url, self.jamf_user, self.jamf_password
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
         else:
-            raise ProcessorError("ERROR: Valid credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
-        jamf_pro_version = self.get_jamf_pro_version(self.jamf_url, token)
+        jamf_pro_version = self.get_jamf_pro_version(jamf_url, token)
         if APLooseVersion(jamf_pro_version) >= APLooseVersion("11.5"):
             # set default mode to pkg_api_mode if using Jamf Cloud / AWS
             if not self.env.get("SMB_URL") and not self.env.get("SMB_SHARES"):
-                self.pkg_api_mode = True
+                pkg_api_mode = True
 
         # clear any pre-existing summary result
         if "jamfpackagerecalculator_summary_result" in self.env:
@@ -108,24 +100,25 @@ class JamfPackageRecalculatorBase(JamfUploaderBase):
 
         # recalculate packages on JCDS if the metadata was updated and recalculation requested
         # (only works on Jamf Pro 11.10 or newer)
-        if (self.pkg_api_mode or self.jcds2_mode) and APLooseVersion(
+        if (pkg_api_mode or jcds2_mode) and APLooseVersion(
             jamf_pro_version
         ) >= APLooseVersion("11.10"):
             # check token using oauth or basic auth depending on the credentials given
             # as package upload may have taken some time
-            if self.client_id and self.client_secret:
-                token = self.handle_oauth(
-                    self.jamf_url, self.client_id, self.client_secret
-                )
-            elif self.jamf_user and self.jamf_password:
+            # get token using oauth or basic auth depending on the credentials given
+            if jamf_url:
                 token = self.handle_api_auth(
-                    self.jamf_url, self.jamf_user, self.jamf_password
+                    jamf_url,
+                    jamf_user=jamf_user,
+                    password=jamf_password,
+                    client_id=client_id,
+                    client_secret=client_secret,
                 )
             else:
-                raise ProcessorError("ERROR: Valid credentials not supplied")
+                raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
             # now send the recalculation request
-            packages_recalculated = self.recalculate_packages(self.jamf_url, token)
+            packages_recalculated = self.recalculate_packages(jamf_url, token)
         else:
             packages_recalculated = False
 

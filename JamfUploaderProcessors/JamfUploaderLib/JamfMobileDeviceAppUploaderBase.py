@@ -42,7 +42,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
     def get_vpp_id(self, jamf_url, token):
         """Get the first Volume Purchasing Location ID."""
         url_filter = "?page=0&page-size=100&sort=id"
-        object_type = "volume_purchasing_locations"
+        object_type = "volume_purchasing_location"
         url = jamf_url + "/" + self.api_endpoints(object_type) + url_filter
         r = self.curl(request="GET", url=url, token=token)
         if r.status_code == 200:
@@ -64,8 +64,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 appconfig_template = found_template
                 with open(appconfig_template, "r", encoding="utf-8") as file:
                     appconfig_xml = file.read()
-            
-                """substitute user assignable keys and escape XML"""
+
+                # substitute user assignable keys and escape XML
                 appconfig = self.substitute_assignable_keys(
                     appconfig_xml, xml_escape=True
                 )
@@ -76,7 +76,9 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                     f"ERROR: AppConfig XML file {appconfig_template} not found"
                 )
 
-    def prepare_mobiledeviceapp_template(self, mobiledeviceapp_name, mobiledeviceapp_template):
+    def prepare_mobiledeviceapp_template(
+        self, jamf_url, mobiledeviceapp_name, mobiledeviceapp_template
+    ):
         """prepare the mobiledeviceapp contents"""
         # import template from file and replace any keys in the template
         if os.path.exists(mobiledeviceapp_template):
@@ -95,7 +97,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
         self.output(template_contents, verbose_level=2)
 
         # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
+        template_xml = self.write_temp_file(jamf_url, template_contents)
         return mobiledeviceapp_name, template_xml
 
     def upload_mobiledeviceapp(
@@ -127,10 +129,17 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 data=template_xml,
             )
             # check HTTP response
-            if self.status_check(r, "mobile_device_application", mobiledeviceapp_name, request) == "break":
+            if (
+                self.status_check(
+                    r, "mobile_device_application", mobiledeviceapp_name, request
+                )
+                == "break"
+            ):
                 break
             if count > 5:
-                self.output("WARNING: Mobile device app upload did not succeed after 5 attempts")
+                self.output(
+                    "WARNING: Mobile device app upload did not succeed after 5 attempts"
+                )
                 self.output(f"\nHTTP POST Response Code: {r.status_code}")
                 raise ProcessorError("ERROR: Mobile device app upload failed ")
             if int(sleep_time) > 30:
@@ -151,11 +160,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
         selfservice_icon_uri = self.env.get("selfservice_icon_uri")
         mobiledeviceapp_template = self.env.get("mobiledeviceapp_template")
         appconfig_template = self.env.get("appconfig_template")
-        replace_mobiledeviceapp = self.env.get("replace_mobiledeviceapp")
+        replace_mobiledeviceapp = self.to_bool(self.env.get("replace_mobiledeviceapp"))
         sleep_time = self.env.get("sleep")
-        # handle setting replace in overrides
-        if not replace_mobiledeviceapp or replace_mobiledeviceapp == "False":
-            replace_mobiledeviceapp = False
         mobiledeviceapp_updated = False
 
         # clear any pre-existing summary result
@@ -176,14 +182,16 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
         self.output(f"Checking for existing '{mobiledeviceapp_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
+        if jamf_url:
             token = self.handle_api_auth(
-                jamf_url, jamf_user, jamf_password
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # check for existing - requires obj_name
         obj_type = "mobile_device_application"
@@ -201,7 +209,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
             )
             if replace_mobiledeviceapp:
                 self.output(
-                    f"Replacing existing Mobile device app as 'replace_mobiledeviceapp' is set to {replace_mobiledeviceapp}",
+                    f"Replacing existing Mobile device app as 'replace_mobiledeviceapp' "
+                    f"is set to True",
                     verbose_level=1,
                 )
 
@@ -214,9 +223,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                     token=token,
                 )
                 if bundleid:
-                    self.output(
-                        f"Existing bundle ID is '{bundleid}'", verbose_level=1
-                    )
+                    self.output(f"Existing bundle ID is '{bundleid}'", verbose_level=1)
                 # obtain the Mobile device app version
                 mobiledeviceapp_version = self.get_api_obj_value_from_id(
                     jamf_url,
@@ -253,7 +260,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 )
                 if itunes_store_url:
                     self.output(
-                        f"Existing Mobile device URL is '{itunes_store_url}'", verbose_level=1
+                        f"Existing Mobile device URL is '{itunes_store_url}'",
+                        verbose_level=1,
                     )
                 # obtain the Mobile device app icon
                 if not selfservice_icon_uri:
@@ -270,9 +278,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                             verbose_level=1,
                         )
                 # obtain the VPP location
-                self.output(
-                    "Obtaining VPP ID", verbose_level=2
-                )
+                self.output("Obtaining VPP ID", verbose_level=2)
                 vpp_id = self.get_vpp_id(jamf_url, token)
                 if vpp_id:
                     self.output(
@@ -280,11 +286,14 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                         verbose_level=1,
                     )
                 else:
-                    self.output(
-                        "Didn't retrieve a VPP ID", verbose_level=2
-                    )
+                    self.output("Didn't retrieve a VPP ID", verbose_level=2)
                 # obtain appconfig
-                if not appconfig_template:
+                appconfig = ""
+                if appconfig_template:
+                    appconfig = self.make_escaped_appconfig_from_template(
+                        appconfig_template
+                    )
+                else:
                     appconfig = self.get_api_obj_value_from_id(
                         jamf_url,
                         "mobile_device_application",
@@ -292,8 +301,6 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                         "app_configuration/preferences",
                         token=token,
                     )
-                if appconfig_template:
-                    appconfig = self.make_escaped_appconfig_from_template(appconfig_template)
 
                 # we need to substitute the values in the Mobile device app name and template now to
                 # account for URL and Bundle ID
@@ -305,8 +312,10 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 self.env["selfservice_icon_uri"] = selfservice_icon_uri
                 self.env["vpp_id"] = vpp_id
                 self.env["appconfig"] = appconfig
-                mobiledeviceapp_name, template_xml = self.prepare_mobiledeviceapp_template(
-                    mobiledeviceapp_name, mobiledeviceapp_template
+                mobiledeviceapp_name, template_xml = (
+                    self.prepare_mobiledeviceapp_template(
+                        jamf_url, mobiledeviceapp_name, mobiledeviceapp_template
+                    )
                 )
 
                 # upload the mobiledeviceapp
@@ -325,7 +334,10 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 self.env["mobiledeviceapp_updated"] = mobiledeviceapp_updated
                 if mobiledeviceapp_updated:
                     self.env["jamfmobiledeviceappuploader_summary_result"] = {
-                        "summary_text": "The following Mobile device apps were updated in Jamf Pro:",
+                        "summary_text": (
+                            "The following Mobile device apps were updated in "
+                            "Jamf Pro:"
+                        ),
                         "report_fields": ["mobiledeviceapp", "template"],
                         "data": {
                             "mobiledeviceapp": mobiledeviceapp_name,
@@ -334,7 +346,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                     }
             else:
                 self.output(
-                    "Not replacing existing Mobile device app. Use replace_mobiledeviceapp='True' to enforce.",
+                    "Not replacing existing Mobile device app. "
+                    "Use replace_mobiledeviceapp='True' to enforce.",
                     verbose_level=1,
                 )
                 return
@@ -362,9 +375,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                     token=token,
                 )
                 if bundleid:
-                    self.output(
-                        f"Existing bundle ID is '{bundleid}'", verbose_level=1
-                    )
+                    self.output(f"Existing bundle ID is '{bundleid}'", verbose_level=1)
                 # obtain the Mobile device app version
                 mobiledeviceapp_version = self.get_api_obj_value_from_id(
                     jamf_url,
@@ -401,7 +412,8 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 )
                 if itunes_store_url:
                     self.output(
-                        f"Existing Mobile device URL is '{itunes_store_url}'", verbose_level=1
+                        f"Existing Mobile device URL is '{itunes_store_url}'",
+                        verbose_level=1,
                     )
                 # obtain the Mobile device app icon
                 if not selfservice_icon_uri:
@@ -419,9 +431,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                         )
 
                 # obtain the VPP location
-                self.output(
-                    "Obtaining VPP ID", verbose_level=2
-                )
+                self.output("Obtaining VPP ID", verbose_level=2)
                 vpp_id = self.get_vpp_id(jamf_url, token)
                 if vpp_id:
                     self.output(
@@ -429,9 +439,7 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                         verbose_level=1,
                     )
                 else:
-                    self.output(
-                        "Didn't retrieve a VPP ID", verbose_level=2
-                    )
+                    self.output("Didn't retrieve a VPP ID", verbose_level=2)
                 # obtain appconfig
                 if not appconfig_template:
                     appconfig = self.get_api_obj_value_from_id(
@@ -442,7 +450,9 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                         token=token,
                     )
                 if appconfig_template:
-                    appconfig = self.make_escaped_appconfig_from_template(appconfig_template)
+                    appconfig = self.make_escaped_appconfig_from_template(
+                        appconfig_template
+                    )
 
                 # we need to substitute the values in the Mobile device app name and template now to
                 # account for URL and Bundle ID
@@ -454,8 +464,10 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 self.env["selfservice_icon_uri"] = selfservice_icon_uri
                 self.env["vpp_id"] = vpp_id
                 self.env["appconfig"] = appconfig
-                mobiledeviceapp_name, template_xml = self.prepare_mobiledeviceapp_template(
-                    mobiledeviceapp_name, mobiledeviceapp_template
+                mobiledeviceapp_name, template_xml = (
+                    self.prepare_mobiledeviceapp_template(
+                        jamf_url, mobiledeviceapp_name, mobiledeviceapp_template
+                    )
                 )
 
                 # upload the mobiledeviceapp
@@ -474,7 +486,10 @@ class JamfMobileDeviceAppUploaderBase(JamfUploaderBase):
                 self.env["mobiledeviceapp_updated"] = mobiledeviceapp_updated
                 if mobiledeviceapp_updated:
                     self.env["jamfmobiledeviceappuploader_summary_result"] = {
-                        "summary_text": "The following Mobile device apps were updated in Jamf Pro:",
+                        "summary_text": (
+                            "The following Mobile device apps were updated "
+                            "in Jamf Pro:"
+                        ),
                         "report_fields": ["mobiledeviceapp", "template"],
                         "data": {
                             "mobiledeviceapp": mobiledeviceapp_name,

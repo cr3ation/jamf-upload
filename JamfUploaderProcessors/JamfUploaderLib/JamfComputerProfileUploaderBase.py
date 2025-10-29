@@ -20,7 +20,6 @@ limitations under the License.
 import os.path
 import sys
 import plistlib
-import subprocess
 import uuid
 
 from time import sleep
@@ -89,8 +88,6 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
         mobileconfig_contents["PayloadDisplayName"] = mobileconfig_name
         mobileconfig_contents["PayloadIdentifier"] = existing_identifier
         mobileconfig_contents["PayloadUUID"] = existing_uuid
-        # with open(mobileconfig, "wb") as file:
-        #     plistlib.dump(mobileconfig_contents, file)
         return mobileconfig_contents
 
     def make_mobileconfig_from_payload(
@@ -159,30 +156,6 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
 
         return mobileconfig_plist
 
-    def unsign_signed_mobileconfig(self, mobileconfig_plist):
-        """checks if profile is signed. This is necessary because Jamf cannot
-        upload a signed profile, so we either need to unsign it, or bail"""
-        output_path = os.path.join("/tmp", str(uuid.uuid4()))
-        cmd = [
-            "/usr/bin/security",
-            "cms",
-            "-D",
-            "-i",
-            mobileconfig_plist,
-            "-o",
-            output_path,
-        ]
-        self.output(cmd, verbose_level=1)
-
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        _, err = proc.communicate()
-        if os.path.exists(output_path) and os.stat(output_path).st_size > 0:
-            self.output(f"Profile is signed. Unsigned profile at {output_path}")
-            return output_path
-        elif err:
-            self.output("Profile is not signed.")
-            self.output(err, verbose_level=2)
-
     def upload_mobileconfig(
         self,
         jamf_url,
@@ -240,13 +213,11 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
                 jamf_url, object_type, obj_id, token
             )
             # substitute pre-existing scope
-            template_contents = self.replace_profile_scope(
-                template_contents, existing_scope
-            )
+            template_contents = self.replace_scope(template_contents, existing_scope)
 
         self.output("Uploading Configuration Profile...")
         # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
+        template_xml = self.write_temp_file(jamf_url, template_contents)
 
         # if we find an object ID we put, if not, we post
         url = f"{jamf_url}/{self.api_endpoints(object_type)}/id/{obj_id}"
@@ -302,25 +273,19 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
         organization = self.env.get("organization")
         profile_description = self.env.get("profile_description")
         profile_computergroup = self.env.get("profile_computergroup")
-        replace_profile = self.env.get("replace_profile")
-        retain_scope = self.env.get("retain_scope")
+        replace_profile = self.to_bool(self.env.get("replace_profile"))
+        retain_scope = self.to_bool(self.env.get("retain_scope"))
         sleep_time = self.env.get("sleep")
-        unsign = self.env.get("unsign_profile")
-        # handle setting replace in overrides
-        if not replace_profile or replace_profile == "False":
-            replace_profile = False
-        # handle setting retain_scope in overrides
-        if not retain_scope or retain_scope == "False":
-            retain_scope = False
-        # handle setting unsign in overrides
-        if not unsign or unsign == "False":
-            unsign = False
 
         # clear any pre-existing summary result
         if "jamfcomputerprofileuploader_summary_result" in self.env:
             del self.env["jamfcomputerprofileuploader_summary_result"]
 
         profile_updated = False
+
+        # substitute values in the profile name and category
+        profile_name = self.substitute_assignable_keys(profile_name)
+        profile_category = self.substitute_assignable_keys(profile_category)
 
         # handle files with no path
         if payload and "/" not in payload:
@@ -348,15 +313,15 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
         # description from it, but allowing the values to be substituted by Input keys
         if mobileconfig:
             self.output(f"mobileconfig file supplied: {mobileconfig}")
-            # check if the file is signed
-            mobileconfig_file = self.unsign_signed_mobileconfig(mobileconfig)
+            # check if the file is signed - COMMENTED OUT AS JAMF CURRENTLY STRIPS SIGNING VIA API
+            # mobileconfig_file = self.unsign_signed_mobileconfig(mobileconfig)
             # quit if we get an unsigned profile back and we didn't select --unsign
-            if mobileconfig_file and not unsign:
-                raise ProcessorError(
-                    "Signed profiles cannot be uploaded to Jamf Pro via the API. "
-                    "Use the GUI to upload the signed profile, or use --unsign to upload "
-                    "the profile with the signature removed."
-                )
+            # if mobileconfig_file and not unsign:
+            #     raise ProcessorError(
+            #         "Signed profiles cannot be uploaded to Jamf Pro via the API. "
+            #         "Use the GUI to upload the signed profile, or use --unsign to upload "
+            #         "the profile with the signature removed."
+            #     )
 
             # import mobileconfig
             with open(mobileconfig, "rb") as file:
@@ -429,12 +394,16 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
         self.output(f"Checking for existing '{mobileconfig_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         obj_type = "os_x_configuration_profile"
         obj_name = mobileconfig_name
@@ -449,6 +418,10 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
                 f"Configuration Profile '{mobileconfig_name}' already exists: ID {obj_id}"
             )
             if replace_profile:
+                self.output(
+                    "Replacing existing Computer Profile as 'replace_profile' is set to True",
+                    verbose_level=1,
+                )
                 # grab existing UUID from profile as it MUST match on the destination
                 (
                     existing_uuid,
@@ -496,8 +469,11 @@ class JamfComputerProfileUploaderBase(JamfUploaderBase):
                     self.output("A mobileconfig was not generated so cannot upload.")
             else:
                 self.output(
-                    "Not replacing existing Configuration Profile. "
-                    "Override the replace_profile key to True to enforce."
+                    (
+                        "Not replacing existing Configuration Profile. "
+                        "Override the replace_profile key to True to enforce."
+                    ),
+                    verbose_level=1,
                 )
         else:
             self.output(

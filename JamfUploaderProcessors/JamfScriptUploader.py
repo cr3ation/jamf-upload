@@ -159,7 +159,6 @@ class JamfScriptUploader(JamfScriptUploaderBase):
 
     output_variables = {
         "script_name": {
-            "required": False,
             "description": "Name of the uploaded script",
         },
         "jamfscriptuploader_summary_result": {

@@ -1,4 +1,5 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
 Copyright 2023 Graham Pugh
@@ -27,7 +28,7 @@ import sys
 # imports require noqa comments for E402
 sys.path.insert(0, os.path.dirname(__file__))
 
-from JamfUploaderLib.JamfMobileDeviceProfileUploaderBase import (  # noqa: E402
+from JamfUploaderLib.JamfMobileDeviceProfileUploaderBase import (  # pylint: disable=import-error, wrong-import-position
     JamfMobileDeviceProfileUploaderBase,
 )
 
@@ -36,6 +37,8 @@ __all__ = ["JamfMobileDeviceProfileUploader"]
 
 
 class JamfMobileDeviceProfileUploader(JamfMobileDeviceProfileUploaderBase):
+    """Class to upload a mobile device profile to Jamf Pro"""
+
     description = (
         "A processor for AutoPkg that will upload a device configuration "
         "profile to a Jamf Cloud or on-prem server."
@@ -78,10 +81,6 @@ class JamfMobileDeviceProfileUploader(JamfMobileDeviceProfileUploaderBase):
             "required": False,
             "description": "Path to Configuration Profile mobileconfig file",
         },
-        "identifier": {
-            "required": False,
-            "description": "Configuration Profile payload identifier",
-        },
         "profile_template": {
             "required": False,
             "description": "Path to Configuration Profile XML template file",
@@ -102,14 +101,6 @@ class JamfMobileDeviceProfileUploader(JamfMobileDeviceProfileUploaderBase):
             "required": False,
             "description": "a device group that will be scoped to the profile",
         },
-        "unsign_profile": {
-            "required": False,
-            "description": (
-                "Unsign a mobileconfig file prior to uploading "
-                "if it is signed, if true."
-            ),
-            "default": False,
-        },
         "replace_profile": {
             "required": False,
             "description": "overwrite an existing Configuration Profile if True.",
@@ -123,7 +114,7 @@ class JamfMobileDeviceProfileUploader(JamfMobileDeviceProfileUploaderBase):
     }
 
     output_variables = {
-        "JamfMobileDeviceProfileUploader_summary_result": {
+        "jamfmobiledeviceprofilepploader_summary_result": {
             "description": "Description of interesting results.",
         },
     }

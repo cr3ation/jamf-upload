@@ -63,12 +63,12 @@ class JamfDockItemUploaderBase(JamfUploaderBase):
         ET.SubElement(dock_item_xml_root, "type").text = dock_item_type
         ET.SubElement(dock_item_xml_root, "path").text = dock_item_path
 
-        dock_item_xml = self.write_xml_file(dock_item_xml_root)
+        dock_item_xml = self.write_xml_file(jamf_url, dock_item_xml_root)
 
         self.output("Uploading dock item..")
 
         object_type = "dock_item"
-        url = "{}/{}/id/{}".format(jamf_url, self.api_endpoints(object_type), obj_id)
+        url = f"{jamf_url}/{self.api_endpoints(object_type)}/id/{obj_id}"
 
         count = 0
         while True:
@@ -108,11 +108,8 @@ class JamfDockItemUploaderBase(JamfUploaderBase):
         dock_item_name = self.env.get("dock_item_name")
         dock_item_type = self.env.get("dock_item_type")
         dock_item_path = self.env.get("dock_item_path")
-        replace_dock_item = self.env.get("replace_dock_item")
+        replace_dock_item = self.to_bool(self.env.get("replace_dock_item"))
         sleep_time = self.env.get("sleep")
-        # handle setting replace_pkg in overrides
-        if not replace_dock_item or replace_dock_item == "False":
-            replace_dock_item = False
 
         # clear any pre-existing summary result
         if "jamfdockitemuploader_summary_result" in self.env:
@@ -121,12 +118,16 @@ class JamfDockItemUploaderBase(JamfUploaderBase):
         # Now process the dock item
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # Check for existing dock item
         self.output(f"Checking for existing '{dock_item_name}' on {jamf_url}")
@@ -144,7 +145,7 @@ class JamfDockItemUploaderBase(JamfUploaderBase):
             self.output(f"Dock Item '{dock_item_name}' already exists: ID {obj_id}")
             if replace_dock_item:
                 self.output(
-                    f"Replacing existing dock item as 'replace_dock_item' is set to {replace_dock_item}",
+                    f"Replacing existing dock item as 'replace_dock_item' is set to True",
                     verbose_level=1,
                 )
             else:

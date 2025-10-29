@@ -73,7 +73,7 @@ class JamfAccountUploaderBase(JamfUploaderBase):
                 "ERROR: Jamf returned status code '401' - Access denied."
             )
 
-    def prepare_account_template(self, account_name, account_template):
+    def prepare_account_template(self, jamf_url, account_name, account_template):
         """prepare the account contents"""
         # import template from file and replace any keys in the template
         if os.path.exists(account_template):
@@ -92,7 +92,7 @@ class JamfAccountUploaderBase(JamfUploaderBase):
         self.output(template_contents, verbose_level=2)
 
         # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
+        template_xml = self.write_temp_file(jamf_url, template_contents)
         return account_name, template_xml
 
     def upload_account(
@@ -148,12 +148,10 @@ class JamfAccountUploaderBase(JamfUploaderBase):
         account_name = self.env.get("account_name")
         account_type = self.env.get("account_type")
         domain = self.env.get("domain")
+        group = self.env.get("group")
         account_template = self.env.get("account_template")
-        replace_account = self.env.get("replace_account")
+        replace_account = self.to_bool(self.env.get("replace_account"))
         sleep_time = self.env.get("sleep")
-        # handle setting replace in overrides
-        if not replace_account or replace_account == "False":
-            replace_account = False
         account_updated = False
 
         # clear any pre-existing summary result
@@ -172,14 +170,18 @@ class JamfAccountUploaderBase(JamfUploaderBase):
         self.output(f"Checking for existing '{account_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
-        # check for existing account - requires obj_name and account type
+        # check for existing account - requires account_name and account_type
         obj_id = self.get_account_id_from_name(
             jamf_url,
             account_name,
@@ -187,8 +189,13 @@ class JamfAccountUploaderBase(JamfUploaderBase):
             token=token,
         )
 
-        # check for existing domain - requires obj_name and account type
+        # check for existing LDAP domain
         if domain:
+            self.output(
+                f"Checking for existing LDAP domain '{domain}' on {jamf_url}",
+                verbose_level=1,
+            )
+            # requires obj_name and account type
             domain_id = self.get_api_obj_id_from_name(
                 jamf_url,
                 domain,
@@ -198,17 +205,28 @@ class JamfAccountUploaderBase(JamfUploaderBase):
             self.env["domain"] = domain
             self.env["domain_id"] = domain_id
 
+        # check for existing group - requires obj_name and account type
+        if group:
+            group_id = self.get_account_id_from_name(
+                jamf_url,
+                group,
+                "group",
+                token=token,
+            )
+            self.env["group"] = group
+            self.env["group_id"] = group_id
+
         # we need to substitute the values in the account name and template now to
         # account for version strings in the name
         account_name, template_xml = self.prepare_account_template(
-            account_name, account_template
+            jamf_url, account_name, account_template
         )
 
         if obj_id:
             self.output(f"account '{account_name}' already exists: ID {obj_id}")
             if replace_account:
                 self.output(
-                    f"Replacing existing account as 'replace_account' is set to {replace_account}",
+                    f"Replacing existing account '{account_name}' as 'replace_account' is set to True",
                     verbose_level=1,
                 )
             else:

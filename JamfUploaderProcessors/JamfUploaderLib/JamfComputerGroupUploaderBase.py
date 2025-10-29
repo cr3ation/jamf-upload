@@ -77,14 +77,16 @@ class JamfComputerGroupUploaderBase(JamfUploaderBase):
             )
 
         # substitute user-assignable keys
-        template_contents = self.substitute_assignable_keys(template_contents)
+        template_contents = self.substitute_assignable_keys(
+            template_contents, xml_escape=True
+        )
 
         self.output("Computer Group data:", verbose_level=2)
         self.output(template_contents, verbose_level=2)
 
         self.output("Uploading Computer Group...")
         # write the template to temp file
-        template_xml = self.write_temp_file(template_contents)
+        template_xml = self.write_temp_file(jamf_url, template_contents)
 
         # if we find an object ID we put, if not, we post
         object_type = "computer_group"
@@ -128,11 +130,8 @@ class JamfComputerGroupUploaderBase(JamfUploaderBase):
         client_secret = self.env.get("CLIENT_SECRET")
         computergroup_name = self.env.get("computergroup_name")
         computergroup_template = self.env.get("computergroup_template")
-        replace_group = self.env.get("replace_group")
+        replace_group = self.to_bool(self.env.get("replace_group"))
         sleep_time = self.env.get("sleep")
-        # handle setting replace in overrides
-        if not replace_group or replace_group == "False":
-            replace_group = False
 
         # clear any pre-existing summary result
         if "jamfcomputergroupuploader_summary_result" in self.env:
@@ -149,16 +148,25 @@ class JamfComputerGroupUploaderBase(JamfUploaderBase):
                     f"ERROR: Computer Group file {computergroup_template} not found"
                 )
 
+        # we need to substitute the values in the computer group name now to
+        # account for version strings in the name
+        # substitute user-assignable keys
+        computergroup_name = self.substitute_assignable_keys(computergroup_name)
+
         # now start the process of uploading the object
         self.output(f"Checking for existing '{computergroup_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # check for existing - requires obj_name
         obj_type = "computer_group"
@@ -176,8 +184,7 @@ class JamfComputerGroupUploaderBase(JamfUploaderBase):
             )
             if replace_group:
                 self.output(
-                    "Replacing existing Computer Group as 'replace_group' is set "
-                    f"to {replace_group}",
+                    "Replacing existing Computer Group as 'replace_group' is set to True",
                     verbose_level=1,
                 )
             else:

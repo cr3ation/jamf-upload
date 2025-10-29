@@ -1,4 +1,5 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
 Copyright 2023 Graham Pugh
@@ -75,10 +76,10 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
         self.output(f"Checking for '{category_name}' on {jamf_url}")
         obj_type = "category"
         obj_name = category_name
-        obj_id = self.get_uapi_obj_id_from_name(
+        obj_id = self.get_api_obj_id_from_name(
             jamf_url,
-            obj_type,
             obj_name,
+            obj_type,
             token,
         )
 
@@ -95,6 +96,7 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
         pkg_name,
         pkg_display_name,
         pkg_metadata,
+        sleep_time,
         pkg_id=0,
         token="",
     ):
@@ -136,20 +138,20 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
             verbose_level=2,
         )
 
-        pkg_json = self.write_json_file(pkg_data)
+        pkg_json = self.write_json_file(jamf_url, pkg_data)
 
         # if we find a pkg ID we put, if not, we post
         object_type = "package_v1"
         if int(pkg_id) > 0:
-            url = "{}/{}/{}".format(jamf_url, self.api_endpoints(object_type), pkg_id)
+            url = f"{jamf_url}/{self.api_endpoints(object_type)}/{pkg_id}"
         else:
-            url = "{}/{}".format(jamf_url, self.api_endpoints(object_type))
+            url = f"{jamf_url}/{self.api_endpoints(object_type)}"
 
         count = 0
         while True:
             count += 1
             self.output(
-                "Package metadata upload attempt {}".format(count),
+                f"Package metadata upload attempt {count}",
                 verbose_level=2,
             )
             request = "PUT" if pkg_id else "POST"
@@ -159,10 +161,10 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
                 break
             if count > 5:
                 self.output("Package metadata upload did not succeed after 5 attempts")
-                self.output("\nHTTP POST Response Code: {}".format(r.status_code))
+                self.output(f"\nHTTP POST Response Code: {r.status_code}")
                 raise ProcessorError("ERROR: Package metadata upload failed ")
-            if int(self.sleep) > 30:
-                sleep(int(self.sleep))
+            if int(sleep_time) > 30:
+                sleep(int(sleep_time))
             else:
                 sleep(30)
         if r.status_code == 201:
@@ -186,73 +188,67 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
     ):  # pylint: disable=too-many-branches, too-many-locals, too-many-statements
         """Perform the metadata upload"""
 
-        self.pkg_name = self.env.get("pkg_name")
-        self.pkg_display_name = self.env.get("pkg_display_name")
-        self.replace_metadata = self.env.get("replace_pkg_metadata")
-        self.sleep = self.env.get("sleep")
-        self.jamf_url = self.env.get("JSS_URL").rstrip("/")
-        self.jamf_user = self.env.get("API_USERNAME")
-        self.jamf_password = self.env.get("API_PASSWORD")
-        self.client_id = self.env.get("CLIENT_ID")
-        self.client_secret = self.env.get("CLIENT_SECRET")
-        self.cloud_dp = self.env.get("CLOUD_DP")
-        self.recipe_cache_dir = self.env.get("RECIPE_CACHE_DIR")
-        self.pkg_metadata_updated = False
-
-        # handle setting true/false variables in overrides
-        if not self.replace_metadata or self.replace_metadata == "False":
-            self.replace_metadata = False
+        jamf_url = self.env.get("JSS_URL").rstrip("/")
+        jamf_user = self.env.get("API_USERNAME")
+        jamf_password = self.env.get("API_PASSWORD")
+        client_id = self.env.get("CLIENT_ID")
+        client_secret = self.env.get("CLIENT_SECRET")
+        pkg_name = self.env.get("pkg_name")
+        pkg_display_name = self.env.get("pkg_display_name")
+        replace_metadata = self.to_bool(self.env.get("replace_pkg_metadata"))
+        sleep_time = self.env.get("sleep")
+        pkg_metadata_updated = False
 
         # create a dictionary of package metadata from the inputs
-        self.pkg_category = self.env.get("pkg_category")
-        self.reboot_required = self.env.get("reboot_required")
-        if not self.reboot_required or self.reboot_required == "False":
-            self.reboot_required = False
-        self.send_notification = self.env.get("send_notification")
-        if not self.send_notification or self.send_notification == "False":
-            self.send_notification = False
+        pkg_category = self.env.get("pkg_category")
+        pkg_info = self.env.get("pkg_info")
+        notes = self.env.get("pkg_notes")
+        priority = self.env.get("pkg_priority")
+        os_requirements = self.env.get("os_requirements")
+        required_processor = self.env.get("required_processor")
+        reboot_required = self.to_bool(self.env.get("reboot_required"))
+        send_notification = self.to_bool(self.env.get("send_notification"))
 
         # allow passing a pkg path to extract the name
-        if "/" in self.pkg_name:
-            self.pkg_name = os.path.basename(self.pkg_name)
+        if "/" in pkg_name:
+            pkg_name = os.path.basename(pkg_name)
 
-        self.pkg_metadata = {
-            "category": self.env.get("pkg_category"),
-            "info": self.env.get("pkg_info"),
-            "notes": self.env.get("pkg_notes"),
-            "reboot_required": self.reboot_required,
-            "priority": self.env.get("pkg_priority"),
-            "os_requirements": self.env.get("os_requirements"),
-            "required_processor": self.env.get("required_processor"),
-            "send_notification": self.send_notification,
+        pkg_metadata = {
+            "category": pkg_category,
+            "info": pkg_info,
+            "notes": notes,
+            "reboot_required": reboot_required,
+            "priority": priority,
+            "os_requirements": os_requirements,
+            "required_processor": required_processor,
+            "send_notification": send_notification,
         }
 
         # we need to ensure that a zipped package's display name matches the new pkg_name for
         # comparison with an existing package
-        if not self.pkg_display_name:
-            self.pkg_display_name = self.pkg_name
+        if not pkg_display_name:
+            pkg_display_name = pkg_name
 
         # clear any pre-existing summary result
         if "jamfpkgmetadatauploader_summary_result" in self.env:
             del self.env["jamfpkgmetadatauploader_summary_result"]
 
         # now start the process of uploading the package
-        self.output(
-            f"Checking for existing metadata '{self.pkg_name}' on {self.jamf_url}"
-        )
+        self.output(f"Checking for existing metadata '{pkg_name}' on {jamf_url}")
 
-        # get Jamf Pro version to determine default mode (need to get a token)
-        # Version 11.5+ will use the v1/packages endpoint
-        if self.jamf_url and self.client_id and self.client_secret:
-            token = self.handle_oauth(self.jamf_url, self.client_id, self.client_secret)
-        elif self.jamf_url and self.jamf_user and self.jamf_password:
+        # get token using oauth or basic auth depending on the credentials given
+        if jamf_url:
             token = self.handle_api_auth(
-                self.jamf_url, self.jamf_user, self.jamf_password
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
         else:
-            raise ProcessorError("ERROR: Valid credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
-        jamf_pro_version = self.get_jamf_pro_version(self.jamf_url, token)
+        jamf_pro_version = self.get_jamf_pro_version(jamf_url, token)
 
         if APLooseVersion(jamf_pro_version) < APLooseVersion("11.4"):
             raise ProcessorError(
@@ -260,32 +256,25 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
             )
 
         # get token using oauth or basic auth depending on the credentials given
-        # (dbfileupload requires basic auth)
-        if (
-            self.jamf_url
-            and self.client_id
-            and self.client_secret
-            and (self.jcds2_mode or self.pkg_api_mode)
-        ):
-            token = self.handle_oauth(self.jamf_url, self.client_id, self.client_secret)
-        elif self.jamf_url and self.jamf_user and self.jamf_password:
+        if jamf_url:
             token = self.handle_api_auth(
-                self.jamf_url, self.jamf_user, self.jamf_password
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
         else:
-            raise ProcessorError(
-                "ERROR: Valid credentials not supplied (note that API Clients can "
-                "only be used with jcds2_mode or pkg_api_mode)"
-            )
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # check for existing pkg
-        obj_id = self.check_pkg(self.pkg_name, self.jamf_url, token=token)
+        obj_id = self.check_pkg(pkg_name, jamf_url, token=token)
         self.output(f"ID: {obj_id}", verbose_level=3)  # TEMP
         if obj_id != "-1":
-            self.output(f"Package '{self.pkg_name}' already exists: ID {obj_id}")
+            self.output(f"Package '{pkg_name}' already exists: ID {obj_id}")
             pkg_id = obj_id  # assign pkg_id for smb runs - JCDS runs get it from the pkg upload
         else:
-            self.output(f"Package '{self.pkg_name}' not found on server")
+            self.output(f"Package '{pkg_name}' not found on server")
             pkg_id = 0
 
         # now process the package metadata
@@ -296,14 +285,15 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
                 verbose_level=1,
             )
             self.update_pkg_metadata_api(
-                self.jamf_url,
-                self.pkg_name,
-                self.pkg_display_name,
-                self.pkg_metadata,
+                jamf_url,
+                pkg_name,
+                pkg_display_name,
+                pkg_metadata,
+                sleep_time,
                 pkg_id=pkg_id,
                 token=token,
             )
-            self.pkg_metadata_updated = True
+            pkg_metadata_updated = True
         else:
             # create new package metadata object
             self.output(
@@ -311,20 +301,21 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
                 verbose_level=1,
             )
             obj_id = self.update_pkg_metadata_api(
-                self.jamf_url,
-                self.pkg_name,
-                self.pkg_display_name,
-                self.pkg_metadata,
+                jamf_url,
+                pkg_name,
+                pkg_display_name,
+                pkg_metadata,
+                sleep_time,
                 pkg_id=pkg_id,
                 token=token,
             )
-            self.pkg_metadata_updated = True
+            pkg_metadata_updated = True
 
         # output the summary
-        self.env["pkg_name"] = self.pkg_name
-        self.env["pkg_display_name"] = self.pkg_display_name
-        self.env["pkg_metadata_updated"] = self.pkg_metadata_updated
-        if self.pkg_metadata_updated:
+        self.env["pkg_name"] = pkg_name
+        self.env["pkg_display_name"] = pkg_display_name
+        self.env["pkg_metadata_updated"] = pkg_metadata_updated
+        if pkg_metadata_updated:
             self.env["jamfpkgmetadatauploader_summary_result"] = {
                 "summary_text": "The following packages were uploaded to or updated in Jamf Pro:",
                 "report_fields": [
@@ -334,9 +325,9 @@ class JamfPkgMetadataUploaderBase(JamfUploaderBase):
                     "pkg_display_name",
                 ],
                 "data": {
-                    "category": self.pkg_category,
+                    "category": pkg_category,
                     "name": str(self.env.get("NAME")),
-                    "pkg_name": self.pkg_name,
-                    "pkg_display_name": self.pkg_display_name,
+                    "pkg_name": pkg_name,
+                    "pkg_display_name": pkg_display_name,
                 },
             }

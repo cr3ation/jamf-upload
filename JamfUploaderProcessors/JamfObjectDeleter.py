@@ -1,7 +1,8 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
-Copyright 2023 Graham Pugh
+Copyright 2025 Graham Pugh
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,9 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 NOTES:
-The API endpoint must be defined in the api_endpoints function in JamfUploaderBase.py
-
-All functions are in JamfUploaderLib/JamfClassicAPIObjectReaderBase.py
+All functions are in JamfUploaderLib/JamfObjectDeleterBase.py
 """
 
 import os.path
@@ -29,20 +28,20 @@ import sys
 # imports require noqa comments for E402
 sys.path.insert(0, os.path.dirname(__file__))
 
-from JamfUploaderLib.JamfClassicAPIObjectReaderBase import (  # noqa: E402
-    JamfClassicAPIObjectReaderBase,
+from JamfUploaderLib.JamfObjectDeleterBase import (  # pylint: disable=import-error, wrong-import-position
+    JamfObjectDeleterBase,
 )
 
-__all__ = ["JamfClassicAPIObjectReader"]
+__all__ = ["JamfObjectDeleter"]
 
 
-class JamfClassicAPIObjectReader(JamfClassicAPIObjectReaderBase):
+class JamfObjectDeleter(JamfObjectDeleterBase):
+    """Processor to delete an API object"""
+
     description = (
-        "A processor for AutoPkg that will read an API object template "
-        "on a Jamf Pro server."
-        "'Jamf Pro privileges are required by the API_USERNAME user for whatever the endpoint is."
+        "A processor for AutoPkg that will delete a policy from a Jamf Cloud "
+        "or on-prem server."
     )
-
     input_variables = {
         "JSS_URL": {
             "required": True,
@@ -74,7 +73,7 @@ class JamfClassicAPIObjectReader(JamfClassicAPIObjectReaderBase):
         },
         "object_name": {
             "required": True,
-            "description": "Name of the object",
+            "description": "Object to delete",
             "default": "",
         },
         "object_type": {
@@ -85,11 +84,8 @@ class JamfClassicAPIObjectReader(JamfClassicAPIObjectReaderBase):
     }
 
     output_variables = {
-        "object_name": {
-            "description": "Jamf object name of the object.",
-        },
-        "object_id": {
-            "description": "Jamf object ID of the object.",
+        "jamfobjectdeleter_summary_result": {
+            "description": "Description of interesting results.",
         },
     }
 
@@ -100,5 +96,5 @@ class JamfClassicAPIObjectReader(JamfClassicAPIObjectReaderBase):
 
 
 if __name__ == "__main__":
-    PROCESSOR = JamfClassicAPIObjectReader()
+    PROCESSOR = JamfObjectDeleter()
     PROCESSOR.execute_shell()

@@ -36,11 +36,11 @@ from JamfUploaderBase import (  # pylint: disable=import-error, wrong-import-pos
 )
 
 
-class JamfClassicAPIObjectReaderBase(JamfUploaderBase):
-    """Class for functions used to read a generic Classic API object in Jamf"""
+class JamfObjectDeleterBase(JamfUploaderBase):
+    """Class for functions used to delete an API object from Jamf"""
 
     def execute(self):
-        """Upload an API object"""
+        """Delete an API object"""
         jamf_url = self.env.get("JSS_URL").rstrip("/")
         jamf_user = self.env.get("API_USERNAME")
         jamf_password = self.env.get("API_PASSWORD")
@@ -50,40 +50,60 @@ class JamfClassicAPIObjectReaderBase(JamfUploaderBase):
         object_type = self.env.get("object_type")
 
         # clear any pre-existing summary result
-        if "jamfclassicapiobjectreader_summary_result" in self.env:
-            del self.env["jamfclassicapiobjectreader_summary_result"]
-
-        # now start the process of reading the object
+        if "jamfobjectdeleter_summary_result" in self.env:
+            del self.env["jamfobjectdeleter_summary_result"]
 
         # get token using oauth or basic auth depending on the credentials given
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         else:
-            raise ProcessorError("ERROR: Credentials not supplied")
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
-        # Check for existing item
-        self.output(f"Checking for existing '{object_name}' on {jamf_url}")
+        if "_settings" in object_type:
+            self.output(f"Object of type {object_type} cannot be deleted")
+            return
 
+        self.output(
+            f"Checking for existing {object_type} '{object_name}' on {jamf_url}"
+        )
+
+        # declare name key
+        namekey = self.get_namekey(object_type)
+
+        # get the ID from the object bearing the supplied name
         obj_id = self.get_api_obj_id_from_name(
-            jamf_url,
-            object_name,
-            object_type,
-            token=token,
+            jamf_url, object_name, object_type, token=token, filter_name=namekey
         )
 
         if obj_id:
             self.output(f"{object_type} '{object_name}' exists: ID {obj_id}")
-            # get the XML
-            existing_object_xml = self.get_api_obj_xml_from_id(
-                jamf_url, object_type, obj_id, obj_path="", token=token
+            self.output(
+                f"Deleting existing {object_type}",
+                verbose_level=1,
             )
-
-            self.output(existing_object_xml) # TEMP
-
+            self.delete_object(
+                jamf_url,
+                object_type,
+                obj_id,
+                token,
+            )
+        else:
+            self.output(
+                f"{object_type} '{object_name}' not found on {jamf_url}.",
+                verbose_level=1,
+            )
+            return
 
         # output the summary
-        self.env["object_name"] = object_name
-        self.env["object_id"] = obj_id
-        self.env["object_type"] = object_type
+
+        self.env["jamfobjectdeleter_summary_result"] = {
+            "summary_text": "The following API objects were deleted from Jamf Pro:",
+            "report_fields": ["type", "name"],
+            "data": {"type": object_type, "name": object_name},
+        }

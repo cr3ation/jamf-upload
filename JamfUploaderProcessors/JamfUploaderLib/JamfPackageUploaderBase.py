@@ -1,4 +1,5 @@
 #!/usr/local/autopkg/python
+# pylint: disable=invalid-name
 
 """
 Copyright 2023 Graham Pugh
@@ -441,7 +442,7 @@ class JamfPackageUploaderBase(JamfUploaderBase):
             else:
                 sleep(30)
 
-            return credentials
+        return credentials
 
     def upload_to_jcds2_s3_bucket(
         self,
@@ -580,10 +581,10 @@ class JamfPackageUploaderBase(JamfUploaderBase):
         self.output(f"Checking for '{category_name}' on {jamf_url}")
         obj_type = "category"
         obj_name = category_name
-        obj_id = self.get_uapi_obj_id_from_name(
+        obj_id = self.get_api_obj_id_from_name(
             jamf_url,
-            obj_type,
             obj_name,
+            obj_type,
             token,
         )
 
@@ -653,7 +654,7 @@ class JamfPackageUploaderBase(JamfUploaderBase):
             verbose_level=2,
         )
 
-        pkg_json = self.write_json_file(pkg_data)
+        pkg_json = self.write_json_file(jamf_url, pkg_data)
 
         # if we find a pkg ID we put, if not, we post
         object_type = "package_v1"
@@ -832,43 +833,35 @@ class JamfPackageUploaderBase(JamfUploaderBase):
         pkg_name = self.env.get("pkg_name")
         pkg_display_name = self.env.get("pkg_display_name")
         version = self.env.get("version")
-        replace = self.env.get("replace_pkg")
+        replace = self.to_bool(self.env.get("replace_pkg"))
         sleep_time = self.env.get("sleep")
-        replace_metadata = self.env.get("replace_pkg_metadata")
-        skip_metadata_upload = self.env.get("skip_metadata_upload")
-        jcds2_mode = self.env.get("jcds2_mode")
-        aws_cdp_mode = self.env.get("aws_cdp_mode")
-        recalculate = self.env.get("recalculate")
+        replace_metadata = self.to_bool(self.env.get("replace_pkg_metadata"))
+        skip_metadata_upload = self.to_bool(self.env.get("skip_metadata_upload"))
+        jcds2_mode = self.to_bool(self.env.get("jcds2_mode"))
+        aws_cdp_mode = self.to_bool(self.env.get("aws_cdp_mode"))
+        recalculate = self.to_bool(self.env.get("recalculate"))
         use_md5 = self.env.get("md5")
         jamf_url = self.env.get("JSS_URL").rstrip("/")
         jamf_user = self.env.get("API_USERNAME")
         jamf_password = self.env.get("API_PASSWORD")
         client_id = self.env.get("CLIENT_ID")
         client_secret = self.env.get("CLIENT_SECRET")
-        cloud_dp = self.env.get("CLOUD_DP")
+        cloud_dp = self.to_bool(self.env.get("CLOUD_DP"))
         recipe_cache_dir = self.env.get("RECIPE_CACHE_DIR")
         pkg_uploaded = False
         pkg_metadata_updated = False
 
-        # handle setting true/false variables in overrides
-        if not replace or replace == "False":
-            replace = False
-        if not replace_metadata or replace_metadata == "False":
-            replace_metadata = False
-        if not skip_metadata_upload or skip_metadata_upload == "False":
-            skip_metadata_upload = False
-        if not jcds2_mode or jcds2_mode == "False":
-            jcds2_mode = False
-        if not aws_cdp_mode or aws_cdp_mode == "False":
-            aws_cdp_mode = False
-        if not recalculate or recalculate == "False":
-            recalculate = False
-        if not cloud_dp or cloud_dp == "False":
-            cloud_dp = False
-
         # set pkg_name if not separately defined
         if not pkg_name:
             pkg_name = os.path.basename(pkg_path)
+
+        # handle files with a relative path
+        if not pkg_path.startswith("/"):
+            found_pkg = self.get_path_to_file(pkg_path)
+            if found_pkg:
+                pkg_path = found_pkg
+            else:
+                raise ProcessorError(f"ERROR: pkg {pkg_path} not found")
 
         # Create a list of smb shares in tuples
         smb_shares = []
@@ -941,6 +934,10 @@ class JamfPackageUploaderBase(JamfUploaderBase):
 
         # create a dictionary of package metadata from the inputs
         pkg_category = self.env.get("pkg_category")
+
+        # substitute values in the package category
+        pkg_category = self.substitute_assignable_keys(pkg_category)
+
         reboot_required = self.env.get("reboot_required")
         if not reboot_required or reboot_required == "False":
             reboot_required = False
@@ -949,7 +946,7 @@ class JamfPackageUploaderBase(JamfUploaderBase):
             send_notification = False
 
         pkg_metadata = {
-            "category": self.env.get("pkg_category"),
+            "category": pkg_category,
             "info": self.env.get("pkg_info"),
             "notes": self.env.get("pkg_notes"),
             "reboot_required": reboot_required,
@@ -990,16 +987,16 @@ class JamfPackageUploaderBase(JamfUploaderBase):
         self.output(f"Checking for existing package '{pkg_name}' on {jamf_url}")
 
         # get token using oauth or basic auth depending on the credentials given
-        # (dbfileupload requires basic auth)
-        if jamf_url and client_id and client_secret:
-            token = self.handle_oauth(jamf_url, client_id, client_secret)
-        elif jamf_url and jamf_user and jamf_password:
-            token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
-        else:
-            raise ProcessorError(
-                "ERROR: Valid credentials not supplied (note that API Clients cannot "
-                "be used on Jamf Pro versions older than 11.5)"
+        if jamf_url:
+            token = self.handle_api_auth(
+                jamf_url,
+                jamf_user=jamf_user,
+                password=jamf_password,
+                client_id=client_id,
+                client_secret=client_secret,
             )
+        else:
+            raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # get Jamf Pro version to determine default mode
         # Version 11.5+ will use the v1/packages endpoint
@@ -1022,10 +1019,10 @@ class JamfPackageUploaderBase(JamfUploaderBase):
                 pkg_id = 0
         else:
             filter_name = "packageName"
-            obj_id = self.get_uapi_obj_id_from_name(
+            obj_id = self.get_api_obj_id_from_name(
                 jamf_url,
-                "package_v1",
                 pkg_name,
+                "package_v1",
                 token=token,
                 filter_name=filter_name,
             )
@@ -1069,8 +1066,11 @@ class JamfPackageUploaderBase(JamfUploaderBase):
                     pkg_uploaded = True
             else:
                 self.output(
-                    f"Not replacing existing {pkg_name} as 'replace_pkg' is set to "
-                    f"{replace}. Use replace_pkg='True' to enforce."
+                    (
+                        f"Not replacing existing {pkg_name} as 'replace_pkg' is set to "
+                        "False. Use replace_pkg='True' to enforce."
+                    ),
+                    verbose_level=1,
                 )
                 if "smb://" in smb_url:
                     # unmount the share
@@ -1205,12 +1205,17 @@ class JamfPackageUploaderBase(JamfUploaderBase):
         # as package upload may have taken some time
         # (not required for standard mode)
         if not smb_shares and not aws_cdp_mode and not jcds2_mode and not legacy_mode:
-            if jamf_url and client_id and client_secret:
-                token = self.handle_oauth(jamf_url, client_id, client_secret)
-            elif jamf_url and jamf_user and jamf_password:
-                token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+            # get token using oauth or basic auth depending on the credentials given
+            if jamf_url:
+                token = self.handle_api_auth(
+                    jamf_url,
+                    jamf_user=jamf_user,
+                    password=jamf_password,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                )
             else:
-                raise ProcessorError("ERROR: Valid credentials not supplied")
+                raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
         # now process the package metadata
         if (
@@ -1325,12 +1330,17 @@ class JamfPackageUploaderBase(JamfUploaderBase):
         ):
             # check token again using oauth or basic auth depending on the credentials given
             # as package upload may have taken some time
-            if client_id and client_secret:
-                token = self.handle_oauth(jamf_url, client_id, client_secret)
-            elif jamf_user and jamf_password:
-                token = self.handle_api_auth(jamf_url, jamf_user, jamf_password)
+            # get token using oauth or basic auth depending on the credentials given
+            if jamf_url:
+                token = self.handle_api_auth(
+                    jamf_url,
+                    jamf_user=jamf_user,
+                    password=jamf_password,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                )
             else:
-                raise ProcessorError("ERROR: Valid credentials not supplied")
+                raise ProcessorError("ERROR: Jamf Pro URL not supplied")
 
             # now send the recalculation request
             packages_recalculated = self.recalculate_packages(jamf_url, token)

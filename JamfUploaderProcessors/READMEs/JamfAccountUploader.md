@@ -16,10 +16,10 @@ A processor for AutoPkg that will upload an account to a Jamf Cloud or on-prem s
   - **required:** False
   - **description:** Password of api user, optionally set as a key in the com.github.autopkg preference file.
 - **CLIENT_ID:**
-  - **required:** True
+  - **required:** False
   - **description:** Client ID with access to access to jss, optionally set as a key in the com.github.autopkg preference file.
 - **CLIENT_SECRET:**
-  - **required:** True
+  - **required:** False
   - **description:** Secret associated with the Client ID, optionally set as a key in the com.github.autopkg preference file.
 - **account_name:**
   - **required:** True
@@ -44,7 +44,7 @@ A processor for AutoPkg that will upload an account to a Jamf Cloud or on-prem s
 - **jamfaccountuploader_summary_result:**
   - **description:** Description of interesting results.
 - **account_name:**
-  - **description:** Policy name.
+  - **description:** Account name.
 - **account_updated:**
   - **description:** Boolean - True if the account was changed.
 - **changed_account_id:**
